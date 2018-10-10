@@ -18,8 +18,11 @@
 # pylint: disable=C0103,R0902,R0913,R0903
 
 from collections import defaultdict
+import sys
 import json
+import argparse
 import requests
+
 from requests.exceptions import ConnectionError as RequestsConnectionError, InvalidSchema
 # why does requests have lookup from string to status code, but not from status code to
 # description? This is, of course, cheating.
@@ -157,6 +160,27 @@ class Place():
                      _(markJson, 'tags'), markJson['title'], markJson['typeCode'],
                      _(markJson, 'uri'))
 
+def consume_args(arguments):
+    """
+    Process command-line arguments.
+
+    Handles bad input and -h/--help. Otherwise returns a `Namespace` object with the given
+    argument values.
+    """
+    parser = argparse.ArgumentParser(
+        description='Process a Firefox bookmarks file, report duplicates or dead links.')
+    parser.add_argument('backup_file', type=argparse.FileType(mode='r'),
+                        help='A Firefox bookmarks backup (not export) file, in JSON format.')
+    parser.add_argument('--version', action='version', version='%(prog)s 0.1.0')
+    parser.add_argument('--dead', action='store_true',
+                        help='Attempt to contact each link, report links with errors.')
+    parser.add_argument('--noduplicates', action='store_true',
+                        help='Disable (default enabled) checking for duplicate links.')
+    parser.add_argument('--limit', type=int,
+                        help='Limit number of links for dead link check (mostly for testing)',
+                        default=-1)
+    return parser.parse_args(arguments)
+
 def parseMark(markJson):
     """Parse a bookmark from dictionary `markJson`, recursively parsing its children."""
     theNode = None
@@ -196,91 +220,116 @@ def find_duplicated_paths(bookmarks):
     dupe_paths = []
     for path, bkmk in walk_tree(bookmarks, ""):
         paths[path].add(bkmk.uri)
-    # of course, the following finds both (menu a, menu b) and (menu b, menu a)
     for key in paths:
         for other in paths:
             if key == other:
                 continue
             if paths[key] == paths[other]:
+                #  we find both (other, key) and (key, other) but for our purposes they're the same
                 if (other, key, ) not in dupe_paths:
                     dupe_paths.append((key, other, ))
-    return (dupe_paths, paths, )
+    return dupe_paths
 
 def test_walk_tree(structure):
     with open('bookmark_titles.txt', 'w') as bkmk_out:
         for path, bookmark in walk_tree(structure, ""):
             bkmk_out.write('{}: {}\n'.format(path, bookmark))
 
-def verify_urls(urls, limit=50):
+_dot_count = 0
+"""Global for communicating between procedures. Should make a class..."""
+def status_update(successful):
+    """Provide visual feedback for each dead link test."""
+    global _dot_count
+    print('.' if successful else 'x', end='', flush=True)
+    _dot_count += 1
+    if _dot_count > 80:
+        print()
+        _dot_count = 0
+
+def verify_urls(urls, limit):
     """Attempt to contact each URL in `urls`, collect connection failures."""
+    global _dot_count
+    _dot_count = 0
+
     check_urls = list(urls)
 
+    if limit != -1:
+        check_urls = check_urls[:limit]
+
     bad_urls = {}
-    dot_count = 0
 
     print('\nTesting URLs:')
-    for i in range(limit):
-        the_url = check_urls[i]
+    for the_url in check_urls:
         if the_url.startswith('javascript:'):
             continue
         try:
             r = requests.get(the_url)
-            # print("{}: {}".format(the_url, r.status_code))
-            if r.status_code != requests.codes.OK: # pylint: disable=E1101
+            if r.status_code != requests.codes.OK:  # pylint: disable=E1101
                 bad_urls[the_url] = "Status Code {} ({})".format(r.status_code,
                                                                  codestrings[r.status_code][0])
+                status_update(False)
             else:
-                print('.', end='', flush=True)
-                dot_count += 1
-                if dot_count > 80:
-                    print()
-                    dot_count = 0
+                status_update(True)
         except TimeoutError:
             bad_urls[the_url] = "Timeout"
+            status_update(False)
         except (ConnectionError, RequestsConnectionError):
             bad_urls[the_url] = "Connection failure"
+            status_update(False)
         except InvalidSchema:
             bad_urls[the_url] = "Not a valid URL!!"
+            status_update(False)
 
     return bad_urls
 
 
 def main():
     """Run the whole process, in a function to keep namespace clean."""
-    with open('data/bookmarks-2018-10-09_fix2.json', 'r') as marks_in:
-        marks = json.load(marks_in)
+
+    return_code = 0
+
+    args = consume_args(sys.argv[1:])
+    marks = json.load(args.backup_file)
 
     structure = parseMark(marks)
-    # print(structure)
-    # for place in structure.children:
-    #     print('    ' + str(place))
-    #     for kid in place.children:
-    #         print('    ' * 2 + str(kid))
 
     all_urls = structure.collect_urls()
     print('Found {:,} bookmarks.'.format(len(all_urls)))
 
     urls_set = set(all_urls)
-    print("found {:,} unique bookmarks.".format(len(urls_set)))
+    print("found {:,} unique links.".format(len(urls_set)))
 
-    # bad_urls = verify_urls(urls_set, 100)
+    if args.dead:
+        bad_urls = verify_urls(urls_set, args.limit)
 
-    # if bad_urls:
-        # print("\nThe following URLs had errors:")
-        # for url in bad_urls:
-            # print("    {}: {}".format(url, bad_urls[url]))
+        if bad_urls:
+            return_code = 1
+            print("\nThe following URLs had errors:")
+            for url in bad_urls:
+                print("    {}: {}".format(url, bad_urls[url]))
+        else:
+            print("\nAll links were retrieved successfully.")
 
-    duplicates = find_dupes(structure)
-    for url in duplicates:
-        print(url)
-        for path in duplicates[url]:
-            print('    ' + path)
+    if not args.noduplicates:
+        duplicates = find_dupes(structure)
+        for url in duplicates:
+            print(url)
+            for path in duplicates[url]:
+                print('    ' + path)
 
-    dupes, paths_dict = find_duplicated_paths(structure)
-    if dupes:
-        print('Identical children:')
-        for key, other in dupes:
-            print('  "{}" and "{}"'.format(key, other))
+        dupe_paths = find_duplicated_paths(structure)
+        if dupe_paths:
+            print('Identical children:')
+            for key, other in dupe_paths:
+                print('  "{}" and "{}"'.format(key, other))
+        if duplicates or dupe_paths:
+            return_code += 2
+
+    if not args.dead and args.noduplicates:
+        print("Nothing else to do! (Both dead link check and duplicates check disabled).")
+
+    return return_code
 
 if __name__ == '__main__':
-    main()
+    code = main()
+    sys.exit(code)

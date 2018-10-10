@@ -24,16 +24,13 @@ Current features include:
 
 Things to add:
 
-1. Parse command-line arguments to pick which operations to perform, read file name from command line, etc.
+1. Automatically remove failing bookmarks, write to new file. (Need to be cautious with this, could remove sites that are only down temporarily).
 
-1. Automatically remove failing bookmarks. (Need to be cautious with this, could remove sites that are only down temporarily).
+2. For duplicate folders or bookmarks, prompt the user to pick one to keep and delete others. Write to new file.
 
-2. For duplicate folders or bookmarks, prompt the user to pick one to keep and delete others.
-
-3. Write the results out to the JSON format, so that they can be imported back into Firefox.
 
 4. Intelligent merge of 2 or more backup files.
 
 ## Alpha!
 
-This is alpha software, if I'm being generous. You'll need to tinker with read\_bmks.py to pick which operations get performed.
+This is alpha software, if I'm being generous. "It worked for me"
