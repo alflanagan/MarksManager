@@ -3,7 +3,13 @@
 
 # pylint: disable=C0103,R0902,R0913,R0903
 
+from collections import defaultdict
 import json
+import requests
+from requests.exceptions import ConnectionError as RequestsConnectionError, InvalidSchema
+# why does requests have lookup from string to status code, but not from status code to
+# description? This is, of course, cheating.
+from requests.status_codes import _codes as codestrings
 
 MARK_TYPES = ('text/x-moz-place-container',
               'text/x-moz-place-separator',
@@ -143,6 +149,7 @@ def parseMark(markJson):
     for cls in (Place, PlaceContainer, PlaceSeparator):
         if cls.MIME_TYPE == markJson['type']:
             theNode = cls.fromJson(markJson)
+            break
 
     if theNode is None:
         raise Exception("Didn't match the MIME type {}".format(markJson['type']))
@@ -153,23 +160,113 @@ def parseMark(markJson):
             theNode.children.append(parseMark(kidJSON))
     return theNode
 
+def walk_tree(bookmark, container_path):
+    if isinstance(bookmark, PlaceSeparator):
+        return
+    if isinstance(bookmark, Place):
+        yield (container_path, bookmark, )
+    if isinstance(bookmark, PlaceContainer):
+        new_path = "/".join((container_path, bookmark.title, )) if bookmark.title and bookmark.title != "/" else container_path
+        for kid in bookmark.children:
+            yield from walk_tree(kid, new_path)
+
+def find_dupes(bookmarks):
+    """Walk the structure of parsed bookmarks, finding duplicate URLs."""
+    dupes = defaultdict(list)
+    for path, bkmk in walk_tree(bookmarks, ""):
+        dupes[bkmk.uri].append(path)
+    return {key: dupes[key] for key in dupes if len(dupes[key]) > 1}
+
+def find_duplicated_paths(bookmarks):
+    paths = defaultdict(set)
+    dupe_paths = []
+    for path, bkmk in walk_tree(bookmarks, ""):
+        paths[path].add(bkmk.uri)
+    # of course, the following finds both (menu a, menu b) and (menu b, menu a)
+    for key in paths:
+        for other in paths:
+            if key == other:
+                continue
+            if paths[key] == paths[other]:
+                if (other, key, ) not in dupe_paths:
+                    dupe_paths.append((key, other, ))
+    return (dupe_paths, paths, )
+
+def test_walk_tree(structure):
+    with open('bookmark_titles.txt', 'w') as bkmk_out:
+        for path, bookmark in walk_tree(structure, ""):
+            bkmk_out.write('{}: {}\n'.format(path, bookmark))
+
+def verify_urls(urls, limit=50):
+    """Attempt to contact each URL in `urls`, collect connection failures."""
+    check_urls = list(urls)
+
+    bad_urls = {}
+    dot_count = 0
+
+    print('\nTesting URLs:')
+    for i in range(limit):
+        the_url = check_urls[i]
+        if the_url.startswith('javascript:'):
+            continue
+        try:
+            r = requests.get(the_url)
+            # print("{}: {}".format(the_url, r.status_code))
+            if r.status_code != requests.codes.OK: # pylint: disable=E1101
+                bad_urls[the_url] = "Status Code {} ({})".format(r.status_code,
+                                                                 codestrings[r.status_code][0])
+            else:
+                print('.', end='', flush=True)
+                dot_count += 1
+                if dot_count > 80:
+                    print()
+                    dot_count = 0
+        except TimeoutError:
+            bad_urls[the_url] = "Timeout"
+        except (ConnectionError, RequestsConnectionError):
+            bad_urls[the_url] = "Connection failure"
+        except InvalidSchema:
+            bad_urls[the_url] = "Not a valid URL!!"
+
+    return bad_urls
+
+
 def main():
     """Run the whole process, in a function to keep namespace clean."""
-    with open('data/bookmarks-2018-10-09.json', 'r') as marks_in:
+    with open('data/bookmarks-2018-10-09_fix2.json', 'r') as marks_in:
         marks = json.load(marks_in)
 
     structure = parseMark(marks)
-    print(structure)
-    for place in structure.children:
-        print('    ' + str(place))
-        for kid in place.children:
-            print('    ' * 2 + str(kid))
+    # print(structure)
+    # for place in structure.children:
+    #     print('    ' + str(place))
+    #     for kid in place.children:
+    #         print('    ' * 2 + str(kid))
 
     all_urls = structure.collect_urls()
     print('Found {:,} bookmarks.'.format(len(all_urls)))
 
-    print("found {:,} unique bookmarks.".format(len(set(all_urls))))
+    urls_set = set(all_urls)
+    print("found {:,} unique bookmarks.".format(len(urls_set)))
 
+    # bad_urls = verify_urls(urls_set, 100)
+
+    # if bad_urls:
+        # print("\nThe following URLs had errors:")
+        # for url in bad_urls:
+            # print("    {}: {}".format(url, bad_urls[url]))
+
+    duplicates = find_dupes(structure)
+    for url in duplicates:
+        print(url)
+        for path in duplicates[url]:
+            print('    ' + path)
+
+    dupes, paths_dict = find_duplicated_paths(structure)
+    if dupes:
+        print('Identical children:')
+        for key, other in dupes:
+            print('  "{}" and "{}"'.format(key, other))
 
 if __name__ == '__main__':
     main()
