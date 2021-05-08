@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """A quick script to read bookmarks from Mozilla JSON export format."""
 
-# Copyright 2018 by Adrian L. Flanagan
+# Copyright 2021 by Adrian L. Flanagan
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
@@ -24,15 +24,14 @@ import argparse
 import requests
 
 from requests.exceptions import ConnectionError as RequestsConnectionError, InvalidSchema
-# why does requests have lookup from string to status code, but not from status code to
-# description? This is, of course, cheating.
-from requests.status_codes import _codes as codestrings
+from requests.status_codes import codes
 
 MARK_TYPES = ('text/x-moz-place-container',
               'text/x-moz-place-separator',
               'text/x-moz-place')
 
-class PlaceContainer():
+
+class PlaceContainer:
     """A container/folder for bookmarks."""
 
     MIME_TYPE = 'text/x-moz-place-container'
@@ -160,6 +159,7 @@ class Place():
                      _(markJson, 'tags'), markJson['title'], markJson['typeCode'],
                      _(markJson, 'uri'))
 
+
 def consume_args(arguments):
     """
     Process command-line arguments.
@@ -180,6 +180,7 @@ def consume_args(arguments):
                         help='Limit number of links for dead link check (mostly for testing)',
                         default=-1)
     return parser.parse_args(arguments)
+
 
 def parseMark(markJson):
     """Parse a bookmark from dictionary `markJson`, recursively parsing its children."""
@@ -266,7 +267,7 @@ def verify_urls(urls, limit):
             r = requests.get(the_url)
             if r.status_code != requests.codes.OK:  # pylint: disable=E1101
                 bad_urls[the_url] = "Status Code {} ({})".format(r.status_code,
-                                                                 codestrings[r.status_code][0])
+                                                                 codes[r.status_code])
                 status_update(False)
             else:
                 status_update(True)
@@ -329,6 +330,7 @@ def main():
         print("Nothing else to do! (Both dead link check and duplicates check disabled).")
 
     return return_code
+
 
 if __name__ == '__main__':
     code = main()

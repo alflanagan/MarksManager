@@ -10,4 +10,3 @@
 % pip-compile --generate-hashes requirements.dev.in
 % pip-sync requirements.*txt
 ```
-
