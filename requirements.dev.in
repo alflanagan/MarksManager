@@ -1,3 +1,3 @@
 pip-tools
-black
+black[d]
 flake8
