@@ -1,6 +1,7 @@
+PIP_COMPILE = pip-compile --generate-hashes --allow-unsafe --resolver=backtracking
+
 requirements:
-	pip-compile --generate-hashes --allow-unsafe requirements.in; \
-	pip-compile --generate-hashes --allow-unsafe requirements.dev.in
+	$(PIP_COMPILE) requirements.in; $(PIP_COMPILE) requirements.dev.in
 
 sync:
 	pip-sync requirements.txt requirements.dev.txt
