@@ -8,7 +8,7 @@ Marks Manager is an attempt at a solution. Previously, Firefox would export your
 
 ## Firefox Gets Smart
 
-Now, Firefox will back up your bookmarks to a beautifly simple JSON format, and restore from the same. So i put some Python scripts together.
+Now, Firefox will back up your bookmarks to a beautifully simple JSON format, and restore from the same. So i put some Python scripts together.
 
 ## What Can This Do?
 
